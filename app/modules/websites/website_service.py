@@ -4,7 +4,7 @@ from .model.website_model import WebsiteModel
 from .schema.create_website_schema import CreateWebsite
 from .schema.update_website_schema import UpdateWebsite
 from .schema.response_website_schema import ResponseListWebsite, ResponseDetailWebsite, ResponseWebsite
-from scrapling import StealthyFetcher
+from scrapling import DynamicFetcher
 from fastapi import HTTPException
 from datetime import date
 from loguru import logger
@@ -12,7 +12,6 @@ from loguru import logger
 class WebsiteService:
     def __init__(self, db: Session):
         self.db = db
-        StealthyFetcher.adaptive = True
 
     def getAll(self) -> ResponseListWebsite:
         """Get all websites"""
@@ -39,17 +38,20 @@ class WebsiteService:
             raise HTTPException(status_code=404, detail=f"Website with ID {id} not found")
 
         logger.info(f"Website found: {website.name}")
-
         logger.info(f"Parsing website configuration and parser settings")
+
         website_dict = ResponseWebsite.model_validate(website).model_dump()
+
         parser = website_dict["parser"]
         url = website_dict["url"]
+        
         logger.info(f"Target URL: {url}")
         logger.info(f"Parser configuration loaded with {len(parser.get('list', []))} list parsers and {len(parser.get('detail', []))} detail parsers")
 
-        logger.info(f"Fetching main page using StealthyFetcher (headless mode)")
+        logger.info(f"Fetching main page using DynamicFetcher (headless mode)")
+        
         try:
-            page = StealthyFetcher.fetch(url, headless=True)
+            page = DynamicFetcher.fetch(url=url, headless=True, network_idle=True, load_dom=True, wait_selector=parser["waitSelectorList"])
             logger.success(f"Successfully fetched main page: {url}")
         except Exception as e:
             logger.error(f"Failed to fetch main page: {str(e)}")
@@ -68,6 +70,8 @@ class WebsiteService:
 
                 if 'selector' in selector:
                     parser[list_name] = page.css(selector["selector"])
+                    print('ini hasilnya')
+                    print(page.css(selector["selector"]))
                     logger.debug(f"    Applied CSS selector: {selector['selector']}")
 
                 if 'action' in selector:
@@ -104,7 +108,7 @@ class WebsiteService:
 
             logger.debug(f"    Fetching detail page...")
             try:
-                detail_page = StealthyFetcher.fetch(url, headless=True)
+                detail_page = DynamicFetcher.fetch(url, headless=True, network_idle=True, load_dom=True, wait_selector=parser["waitSelectorDetail"])
                 logger.debug(f"    Successfully fetched detail page")
             except Exception as e:
                 logger.error(f"    Failed to fetch detail page {url}: {str(e)}")
