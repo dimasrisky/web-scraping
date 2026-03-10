@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.exceptions.swagger_examples import NOT_FOUND, VALIDATION_ERROR, BAD_REQUEST, INTERNAL_SERVER_ERROR
 from .website_service import WebsiteService
 from .schema.create_website_schema import CreateWebsite
 from .schema.update_website_schema import UpdateWebsite
@@ -28,7 +29,15 @@ def get_all_websites(service: WebsiteService = Depends(get_website_service)):
 def trigger_scrapping(id: int, service: WebsiteService = Depends(get_website_service)):
     return service.trigger_scrapping(id)
 
-@website_router.get("/{id}", response_model=ResponseDetailWebsite)
+@website_router.get(
+    "/{id}",
+    response_model=ResponseDetailWebsite,
+    responses={
+        404: NOT_FOUND,
+        422: VALIDATION_ERROR,
+        500: INTERNAL_SERVER_ERROR
+    }
+)
 def get_website(id: int, service: WebsiteService = Depends(get_website_service)):
     return service.getById(id)
 
