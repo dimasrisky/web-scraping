@@ -4,6 +4,7 @@ from .model.website_model import WebsiteModel
 from .schema.create_website_schema import CreateWebsite
 from .schema.update_website_schema import UpdateWebsite
 from .schema.response_website_schema import ResponseListWebsite, ResponseDetailWebsite, ResponseWebsite
+from app.core.exceptions.exceptions import NotFoundException
 from scrapling import DynamicFetcher
 from fastapi import HTTPException
 from datetime import date
@@ -23,6 +24,10 @@ class WebsiteService:
     def getById(self, id: int) -> ResponseDetailWebsite:
         """Get website by ID"""
         website = self.db.query(WebsiteModel).filter(WebsiteModel.id == id).first()
+
+        if not website:
+            raise NotFoundException(detail="Website Not Found", attr="id")
+        
         return {
             "data": website
         }
