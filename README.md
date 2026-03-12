@@ -22,6 +22,7 @@ A robust and flexible web scraping API built with FastAPI that allows you to cre
 - **Flexible Parser Configuration** - JSON-based parsers for different website structures
 - **Headless Browser Support** - Uses DynamicFetcher for JavaScript-rendered pages
 - **Database Management** - PostgreSQL with SQLAlchemy ORM and Alembic migrations
+- **Asynchronous Task Queue** - Celery with Redis/RabbitMQ for background scraping
 - **Standardized Error Handling** - Custom exception system with detailed error responses
 - **Swagger Documentation** - Auto-generated API documentation with examples
 
@@ -40,6 +41,12 @@ A robust and flexible web scraping API built with FastAPI that allows you to cre
 | SQLAlchemy | 2.0.48 | SQL toolkit and ORM |
 | Alembic | 1.18.4 | Database migration tool |
 | PostgreSQL | - | Database system (via psycopg2-binary) |
+
+### Task Queue
+| Technology | Version | Description |
+|------------|---------|-------------|
+| Celery | 5.6.2 | Distributed task queue |
+| Redis/RabbitMQ | - | Message broker for Celery |
 
 ### Web Scraping
 | Technology | Version | Description |
@@ -70,6 +77,9 @@ web-scraping/
 │   │       ├── exception_handlers.py  # Exception handlers
 │   │       └── swagger_examples.py     # Error response examples
 │   └── modules/
+│       ├── queue/                  # Celery task queue module
+│       │   ├── celery.py           # Celery app configuration
+│       │   └── task.py             # Scraping tasks
 │       └── websites/               # Website scraping module
 │           ├── website_router.py   # API endpoints
 │           ├── website_service.py  # Business logic
@@ -91,6 +101,7 @@ web-scraping/
 
 - Python 3.10+
 - PostgreSQL 14+
+- Redis or RabbitMQ (for Celery task queue)
 
 ### Setup
 
@@ -116,7 +127,21 @@ web-scraping/
    alembic upgrade head
    ```
 
-5. **Start the application**
+5. **Start Redis/RabbitMQ** (if using Celery queue)
+   ```bash
+   # For Redis (macOS with Homebrew)
+   brew services start redis
+
+   # For RabbitMQ (macOS with Homebrew)
+   brew services start rabbitmq
+   ```
+
+6. **Start the Celery worker** (in a separate terminal)
+   ```bash
+   celery -A app.modules.queue.celery:celery_app worker --loglevel=info
+   ```
+
+7. **Start the FastAPI application**
    ```bash
    uvicorn app.main:app --reload
    ```
@@ -132,6 +157,15 @@ DATABASE_PORT=5432
 DATABASE_USERNAME=postgres
 DATABASE_PASSWORD=postgres
 DATABASE_NAME=fast_api_scraping
+
+# Celery Configuration (for task queue)
+CELERY_BROKER=redis://localhost:6379/0
+# Or for RabbitMQ:
+# CELERY_BROKER=amqp://guest:guest@localhost:5672//
+
+CELERY_BACKEND=redis://localhost:6379/0
+# Or for RabbitMQ:
+# CELERY_BACKEND=rpc://
 ```
 
 ## API Endpoints
@@ -152,7 +186,8 @@ Base URL: `http://localhost:8000/api/v1`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/websites/{id}/trigger` | Trigger scraping process for a website |
+| GET | `/websites/{id}/trigger` | Trigger synchronous scraping process |
+| GET | `/websites/trigger/queue/{id}` | Trigger asynchronous scraping (Celery queue) |
 
 ### Documentation
 
@@ -186,7 +221,7 @@ Content-Type: application/json
 GET /api/v1/websites
 ```
 
-### Trigger Scraping
+### Trigger Synchronous Scraping
 
 ```bash
 GET /api/v1/websites/1/trigger
@@ -205,6 +240,23 @@ GET /api/v1/websites/1/trigger
 ]
 ```
 
+### Trigger Asynchronous Scraping (Queue)
+
+```bash
+GET /api/v1/websites/trigger/queue/1
+```
+
+**Response:**
+```json
+{
+  "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "queued",
+  "message": "Scraping task has been queued successfully"
+}
+```
+
+**Note:** Make sure the Celery worker is running before triggering queue tasks.
+
 ## Parser Configuration
 
 The parser configuration uses JSON to define how to extract data from websites. Each parser consists of:
@@ -217,43 +269,76 @@ The parser configuration uses JSON to define how to extract data from websites. 
   "waitSelectorDetail": "selector-to-wait-for-detail",
   "list": [
     {
-      "name": "Field Name",
-      "selector": "css-selector",
-      "attribute": "href",
-      "type": "list"
+      "name": "urls",
+      "selectors": [
+        {
+          "selector": "a.article-link",
+          "action": "attrs",
+          "attr": "href"
+        },
+        {
+          "action": "add_firsts",
+          "add": "https://example.com"
+        }
+      ]
     }
   ],
   "detail": [
     {
       "name": "title",
-      "selector": "h1.article-title",
-      "type": "text"
+      "selectors": [
+        {
+          "selector": "h1.article-title",
+          "action": "text"
+        }
+      ]
     },
     {
       "name": "content",
-      "selector": ".article-content",
-      "type": "html"
+      "selectors": [
+        {
+          "selector": ".article-content",
+          "action": "html"
+        }
+      ]
     },
     {
       "name": "imageUrl",
-      "selector": ".article-image img",
-      "attribute": "src",
-      "type": "single"
+      "selectors": [
+        {
+          "selector": ".article-image img",
+          "action": "attr",
+          "attr": "src"
+        }
+      ]
+    },
+    {
+      "name": "creationDate",
+      "selectors": [
+        {
+          "action": "dateTimeNow"
+        }
+      ]
     }
   ]
 }
 ```
 
-### Parser Types
+### Parser Actions
 
-| Type | Description |
-|------|-------------|
-| `text` | Extract inner text |
-| `html` | Extract inner HTML |
-| `single` | Extract attribute from single element |
-| `list` | Extract array of attributes |
+| Action | Description | Parameters |
+|--------|-------------|------------|
+| `text` | Extract inner text | - |
+| `html` | Extract inner HTML | - |
+| `attr` | Extract attribute | `attr`: attribute name |
+| `attrs` | Extract array of attributes | `attr`: attribute name |
+| `add_first` | Prefix single value | `add`: prefix string |
+| `add_firsts` | Prefix array values | `add`: prefix string |
+| `dateTimeNow` | Set to current date | - |
 
 ## Data Flow
+
+### Synchronous Scraping
 
 ```
 ┌─────────┐    ┌─────────────┐    ┌────────────────┐    ┌──────────┐
@@ -274,6 +359,27 @@ The parser configuration uses JSON to define how to extract data from websites. 
                                   └────────────────┘
 ```
 
+### Asynchronous Scraping (Queue)
+
+```
+┌─────────┐    ┌─────────────┐    ┌────────────────┐    ┌──────────┐
+│ Client  │───▶│ FastAPI     │───▶│   Celery Task  │───▶│  Redis/  │
+│ Request │    │ Router      │    │    (Queued)    │    │ RabbitMQ │
+└─────────┘    └─────────────┘    └────────────────┘    └──────────┘
+                                           │
+                                           ▼
+                                  ┌────────────────┐
+                                  │ Celery Worker  │
+                                  │ (Background)   │
+                                  └────────────────┘
+                                           │
+                                           ▼
+                                  ┌────────────────┐
+                                  │ DynamicFetcher │
+                                  │ (Headless)     │
+                                  └────────────────┘
+```
+
 ### Scraping Process
 
 1. **Request** - API receives trigger request with website ID
@@ -282,11 +388,46 @@ The parser configuration uses JSON to define how to extract data from websites. 
 4. **Extract URLs** - Parse list page to get article URLs
 5. **Fetch Detail Pages** - Load each article URL
 6. **Extract Content** - Parse detail pages for structured data
-7. **Return Response** - Send JSON array of scraped articles
+7. **Return Response** - Send JSON array of scraped articles (or task ID for queue)
 
-### Creating Migrations
+## Development
+
+### Running Migrations
 
 ```bash
+# Create a new migration
 alembic revision --autogenerate -m "description"
+
+# Apply migrations
 alembic upgrade head
+
+# Rollback migration
+alembic downgrade -1
+```
+
+### Monitoring Celery Tasks
+
+```bash
+# View active tasks
+celery -A app.modules.queue.celery:celery_app inspect active
+
+# View registered tasks
+celery -A app.modules.queue.celery:celery_app inspect registered
+
+# View worker statistics
+celery -A app.modules.queue.celery:celery_app inspect stats
+```
+
+### Flower (Celery Monitoring UI)
+
+Optional: Install Flower for real-time monitoring of Celery tasks:
+
+```bash
+pip install flower
+
+# Start Flower
+celery -A app.modules.queue.celery:celery_app flower
+
+# Access Flower UI
+# http://localhost:5555
 ```
