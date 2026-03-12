@@ -31,6 +31,17 @@ def create_website(body: CreateWebsite, service: WebsiteService = Depends(get_we
     return website
 
 @website_router.get(
+    '/trigger/queue/{id}',
+    responses={
+        404: NOT_FOUND,
+        422: VALIDATION_ERROR,
+        500: INTERNAL_SERVER_ERROR,
+    }
+)
+def trigger_queue_scraping(id: int, service: WebsiteService = Depends(get_website_service)):
+    return service.trigger_queue_Scraping(id)
+
+@website_router.get(
     "/", 
     response_model=ResponseListWebsite, 
     status_code=200,

@@ -9,6 +9,7 @@ from scrapling import DynamicFetcher
 from fastapi import HTTPException
 from datetime import date
 from loguru import logger
+from ..queue.task import process_scraping
 
 class WebsiteService:
     def __init__(self, db: Session):
@@ -31,6 +32,20 @@ class WebsiteService:
         return {
             "data": website
         }
+        
+    def trigger_queue_Scraping(self, id: int):
+        website = self.db.query(WebsiteModel).filter(WebsiteModel.id == id).first()
+
+        if not website:
+            raise NotFoundException('Website not found')
+
+        add_queue = process_scraping.delay(id)
+        return {
+            "task_id": add_queue.id,
+            "status": "queued",
+            "message": "Scraping task has been queued successfully"
+        }
+        
     
     def trigger_scrapping(self, id: int):
         logger.info(f"Starting scraping process for website ID: {id}")
