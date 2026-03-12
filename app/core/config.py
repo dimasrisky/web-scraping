@@ -15,5 +15,9 @@ class Settings(BaseModel):
     DATABASE_USERNAME: str = os.getenv("DATABASE_USERNAME", "postgres")
     DATABASE_PASSWORD: str = os.getenv("DATABASE_PASSWORD", "")
     DATABASE_NAME: str = os.getenv("DATABASE_NAME", "web_scraping_db")
+    
+    # Celery Configuration
+    CELERY_BROKER: str = os.getenv("CELERY_BROKER")
+    CELERY_BACKEND: str = os.getenv("CELERY_BACKEND")
 
 config = Settings()
